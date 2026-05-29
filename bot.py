@@ -13,8 +13,20 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 load_dotenv()
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
+
+if not BOT_TOKEN:
+    raise ValueError("BOT_TOKEN missing")
+
+
 CHANNEL_ID = os.getenv("CHANNEL_ID")
+
+if not CHANNEL_ID:
+    raise ValueError("CHANNEL_ID missing")
+
 PEXELS_API_KEY = os.getenv("PEXELS_API_KEY")
+
+if not PEXELS_API_KEY:
+    raise ValueError("PEXELS_API_KEY missing")
 
 DATABASE_FILE = "data/posted_wallpapers.json"
 
@@ -41,6 +53,7 @@ def save_posted_ids(posted_ids):
 # ----------------------------
 # MAIN WALLPAPER FUNCTION
 # ----------------------------
+
 async def send_daily_wallpaper():
 
     bot = Bot(token=BOT_TOKEN)
@@ -50,12 +63,12 @@ async def send_daily_wallpaper():
     url = "https://api.pexels.com/v1/search"
 
     headers = {
-        "Authorization": PEXELS_API_KEY
+       "Authorization": PEXELS_API_KEY
     }
 
     params = {
-        "query": "4k wallpaper",
-        "per_page": 80
+       "query": "4k wallpaper",
+       "per_page": 80
     }
 
     response = requests.get(url, headers=headers, params=params, timeout=20)
@@ -65,7 +78,7 @@ async def send_daily_wallpaper():
 
     if not photos:
         print("No photos found.")
-        return
+    return
 
     # Load already posted IDs
     posted_ids = load_posted_ids()
@@ -78,7 +91,7 @@ async def send_daily_wallpaper():
 
     if not new_photos:
         print("No new wallpapers available.")
-        return
+    return
 
     # Pick random new wallpaper
     photo = random.choice(new_photos)
@@ -113,34 +126,26 @@ async def send_daily_wallpaper():
     print("Wallpaper posted successfully!")
 
 
+app = Application.builder().token(BOT_TOKEN).build()
+
+
 # ----------------------------
 # SCHEDULER + MAIN LOOP
 # ----------------------------
-async def main():
+scheduler = AsyncIOScheduler()
+
+# Change this for testing (e.g. minutes=1)
+scheduler.add_job(
+    send_daily_wallpaper,
+    "interval",
+    hours=4
+)
+
+scheduler.start()
+
+print("Bot is running...")
 
 
+app.run_polling()
 
-    scheduler = AsyncIOScheduler()
-
-    # Change this for testing (e.g. minutes=1)
-    scheduler.add_job(
-        send_daily_wallpaper,
-        "interval",
-        hours=6
-    )
-
-    scheduler.start()
-
-    print("Bot is running...")
-
-    app = Application.builder().token(BOT_TOKEN).build()
-
-    await app.run_polling()
-
-    # Keep program alive
-    while True:
-        await asyncio.sleep(60)
-
-
-# Run bot
-asyncio.run(main())
+    
