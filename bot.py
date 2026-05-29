@@ -6,6 +6,7 @@ import asyncio
 
 from dotenv import load_dotenv
 from telegram import Bot
+from telegram.ext import Application
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
 # Load environment variables
@@ -117,6 +118,8 @@ async def send_daily_wallpaper():
 # ----------------------------
 async def main():
 
+
+
     scheduler = AsyncIOScheduler()
 
     # Change this for testing (e.g. minutes=1)
@@ -130,11 +133,14 @@ async def main():
 
     print("Bot is running...")
 
+    app = Application.builder().token(BOT_TOKEN).build()
+
+    await app.run_polling()
+
     # Keep program alive
     while True:
         await asyncio.sleep(60)
 
 
 # Run bot
-if __name__ == "__main__":
-    asyncio.run(main())
+asyncio.run(main())
