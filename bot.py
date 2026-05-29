@@ -134,18 +134,29 @@ app = Application.builder().token(BOT_TOKEN).build()
 # ----------------------------
 scheduler = AsyncIOScheduler()
 
-# Change this for testing (e.g. minutes=1)
-scheduler.add_job(
-    send_daily_wallpaper,
-    "interval",
-    hours=4
-)
+async def main():
+    # Change this for testing (e.g. minutes=1)
+    scheduler.add_job(
+        send_daily_wallpaper,
+        "interval",
+        hours=4
+    )
 
-scheduler.start()
+    scheduler.start()
 
-print("Bot is running...")
+    print("Bot is running...")
+
+    await app.initialize()
+    await app.start()
+    await app.updater.start_polling()
+
+    while True:
+        await asyncio.sleep(60)
+
+if __name__ == "__main__":
+    asyncio.run(main())  
 
 
-app.run_polling()
+
 
     
