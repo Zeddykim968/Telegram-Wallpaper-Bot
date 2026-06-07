@@ -3,6 +3,7 @@ import random
 import json
 import requests
 import asyncio
+import traceback
 
 from dotenv import load_dotenv
 from telegram import Bot
@@ -29,24 +30,51 @@ if not PEXELS_API_KEY:
 
 DATABASE_FILE = "data/posted_wallpapers.json"
 
+PHOTOS_PER_POST = 5
+
 # THEMES
 
-Themes = {
-    "nature":    ("Nature HD"),
-    "city":      ("City HD"),
-    "cars":      ("Cars HD"),
-    "space":     ("Space HD"),
-    "ocean":     ("Ocean HD"),
-    "mountains": ("Mountains HD"),
-    "architecture":  ("Architecture HD"),
-    "animals":   ("Animals HD"),
-    "forest":    ("Forest HD"),
-    "Sunset":    ("Sunset HD"),
-    "Thechnology":  ("Technology HD"),
-    "abstract":  ("Abstract HD"),
-    "programming":  ("Programming"),
-
+THEMES = {
+    "nature": ("🌿", "Cool Nature HD"),
+    "city": ("🏙️", "Cool City HD"),
+    "cars": ("🚗", "Cool Cars HD"),
+    "space": ("🚀", "Cool Space HD"),
+    "ocean": ("🌊", "Cool Ocean HD"),
+    "mountains": ("⛰️", "Cool Mountains HD"),
+    "architecture": ("🏛️", "Cool Architecture HD"),
+    "animals": ("🐾", "Cool Animals HD"),
+    "forest": ("🌲", "Cool Forest HD"),
+    "sunset": ("🌅", "Cool Sunset HD"),
+    "technology": ("💻", "Cool Technology HD"),
+    "abstract": ("🎨", "Cool Abstract HD"),
+    "programming": ("⌨️", "Cool Programming HD"),
 }
+
+def get_quote():
+    try:
+        response = requests.get("https://zenquotes.io/api/random", timeout=10)
+
+        response.raise_for_status()
+
+        data = response.json()[0]
+        quote = data["q"]
+        author = data["a"]
+
+        return f'"{quote}"\n- {author}'
+
+    except Exception as e:
+        fallback_quote = [
+            "The only way to do great work is to love what you do. - Steve Jobs",
+            "In the middle of every difficulty lies opportunity. - Albert Einstein",
+            "Success is not final, failure is not fatal: It is the courage to continue that counts. - Winston Churchill",
+            "Believe you can and you're halfway there. - Theodore Roosevelt",
+            "Your time is limited, so don't waste it living someone else's life. - Steve Jobs",
+            "The best way to predict the future is to invent it. - Alan Kay",
+            "Don't watch the clock; do what it does. Keep going. - Sam Levenson",
+            "The harder you work for something, the greater you'll feel when you achieve it. - Vince Lombardi"
+        ]
+
+        return f'"{random.choice(fallback_quote)}"'
 
 
 # ----------------------------
@@ -139,7 +167,7 @@ async def send_daily_wallpaper():
     print(f"Sending {len(selected)} photos for theme: {theme_label}...")
 
     for i, photo in enumerate(selected):
-        image_url = photo["src"]["large2x"]
+        image_url = photo["src"]["large"] or photo["src"]["medium"] or photo["src"]["original"]  # Try different sizes if needed
         image_path = f"wallpaper_{i}.jpg"
 
         try:
@@ -147,23 +175,28 @@ async def send_daily_wallpaper():
             with open(image_path, "wb") as file:
                 file.write(image_response.content)
 
-            caption = (
-                f"{theme_emoji} *{theme_label} Wallpaper {i + 1}/{len(selected)}*\n"
-                f"Enjoy your wallpaper of the day! 🔥"
+            quote_caption = (
+                f"{theme_emoji} *{theme_label}*\n\n"
+                f"{get_quote()}\n\n"
+                f"_Photo by {photo['photographer']} on Pexels_"
             )
 
             with open(image_path, "rb") as photo_file:
                 await bot.send_photo(
                     chat_id=CHANNEL_ID,
                     photo=photo_file,
-                    caption=caption,
-                    parse_mode="Markdown"
+                    caption=quote_caption,
+                    parse_mode="Markdown",
+                    read_timeout=60,
+                    connect_timeout=60,
+                    pool_timeout=60,
                 )
 
             print(f"  ✓ Photo {i + 1} sent.")
 
         except Exception as e:
-            print(f"  ✗ Failed to send photo {i + 1}: {e}")
+            print(f"  ✗ Failed to send photo {i + 1}")
+            traceback.print_exc()
 
         finally:
             if os.path.exists(image_path):
@@ -173,7 +206,9 @@ async def send_daily_wallpaper():
         await asyncio.sleep(2)
 
     # Update posted IDs for this theme
-    posted_ids.extend([p["id"] for p in selected])
+    successfuly_sent = []
+    successfuly_sent.extend([photo["id"] for photo in selected])
+    posted_ids.extend(successfuly_sent)
     save_posted_ids_for_theme(db, theme_key, posted_ids)
 
     print(f"Done! {len(selected)} wallpapers posted for theme: {theme_label}")    
@@ -187,6 +222,8 @@ async def send_daily_wallpaper():
 scheduler = AsyncIOScheduler()
 
 async def main():
+
+    await send_daily_wallpaper()  # Send immediately on startup
     
     scheduler.add_job(
         send_daily_wallpaper,
@@ -199,7 +236,7 @@ async def main():
     print("Bot is running...")
 
     while True:
-        await ayncio.sleep(60)
+        await asyncio.sleep(60)
 
     
 
