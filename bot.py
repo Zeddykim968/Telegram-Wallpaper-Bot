@@ -187,9 +187,7 @@ async def send_daily_wallpaper():
                     photo=photo_file,
                     caption=quote_caption,
                     parse_mode="Markdown",
-                    read_timeout=60,
-                    connect_timeout=60,
-                    pool_timeout=60,
+                    
                 )
 
             print(f"  ✓ Photo {i + 1} sent.")
