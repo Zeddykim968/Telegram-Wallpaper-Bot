@@ -6,7 +6,6 @@ import asyncio
 
 from dotenv import load_dotenv
 from telegram import Bot
-from telegram.ext import Application
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
 # Load environment variables
@@ -30,112 +29,165 @@ if not PEXELS_API_KEY:
 
 DATABASE_FILE = "data/posted_wallpapers.json"
 
+# THEMES
+
+Themes = {
+    "nature":    ("Nature HD"),
+    "city":      ("City HD"),
+    "cars":      ("Cars HD"),
+    "space":     ("Space HD"),
+    "ocean":     ("Ocean HD"),
+    "mountains": ("Mountains HD"),
+    "architecture":  ("Architecture HD"),
+    "animals":   ("Animals HD"),
+    "forest":    ("Forest HD"),
+    "Sunset":    ("Sunset HD"),
+    "Thechnology":  ("Technology HD"),
+    "abstract":  ("Abstract HD"),
+    "programming":  ("Programming"),
+
+}
+
 
 # ----------------------------
 # DATABASE FUNCTIONS
 # ----------------------------
-def load_posted_ids():
+def load_db():
+    """Load the full DB: { posted_ids: { theme: [id, ...] } }"""
     try:
-        with open(DATABASE_FILE, "r") as file:
-            data = json.load(file)
-            return data.get("posted_ids", [])
+        with open(DATABASE_FILE, "r") as f:
+            return json.load(f)
     except FileNotFoundError:
-        return []
+        return {"posted_ids": {}}
 
 
-def save_posted_ids(posted_ids):
+def save_db(db):
     os.makedirs("data", exist_ok=True)
+    with open(DATABASE_FILE, "w") as f:
+        json.dump(db, f, indent=4)
 
-    with open(DATABASE_FILE, "w") as file:
-        json.dump({"posted_ids": posted_ids}, file, indent=4)
+
+def get_posted_ids_for_theme(db, theme):
+    return db["posted_ids"].get(theme, [])
 
 
-# ----------------------------
+def save_posted_ids_for_theme(db, theme, ids):
+    db["posted_ids"][theme] = ids
+    save_db(db)
+
+
+# FETCH PHOTOS
+
+def fetch_photos(theme_key, page=1):
+    url = "https://api.pexels.com/v1/search"
+    headers = {"Authorization": PEXELS_API_KEY}
+    params = {
+        "query": f"{theme_key} 4k wallpaper",
+        "per_page": 80,
+        "page": page,
+    }
+    response = requests.get(url, headers=headers, params=params, timeout=20)
+    data = response.json()
+    return data.get("photos", [])
+ 
+
+
+
 # MAIN WALLPAPER FUNCTION
-# ----------------------------
+
 
 async def send_daily_wallpaper():
 
     bot = Bot(token=BOT_TOKEN)
 
-    print("Fetching wallpapers...")
+    # Pick a random theme for this run
+    theme_key = random.choice(list(THEMES.keys()))
+    theme_emoji, theme_label = THEMES[theme_key]
 
-    url = "https://api.pexels.com/v1/search"
+    print(f"Theme: {theme_label} | Fetching photos...")
 
-    headers = {
-       "Authorization": PEXELS_API_KEY
-    }
+    db = load_db()
+    posted_ids = get_posted_ids_for_theme(db, theme_key)
 
-    params = {
-       "query": "4k wallpaper",
-       "per_page": 80
-    }
 
-    response = requests.get(url, headers=headers, params=params, timeout=20)
-    data = response.json()
-
-    photos = data.get("photos", [])
+    # Fetch page 1
+    photos = fetch_photos(theme_key, page=1)
 
     if not photos:
-        print("No photos found.")
-    return
+        print(f"No photos returned for theme '{theme_label}'. Skipping.")
+        return
 
-    # Load already posted IDs
-    posted_ids = load_posted_ids()
+    # Filter new photos
+    new_photos = [p for p in photos if p["id"] not in posted_ids]
 
-    # Filter duplicates
-    new_photos = [
-        photo for photo in photos
-        if photo["id"] not in posted_ids
-    ]
+    # If not enough new photos, try page 2
+    if len(new_photos) < PHOTOS_PER_POST:
+        print(f"Not enough new photos ({len(new_photos)}), fetching page 2...")
+        page2 = fetch_photos(theme_key, page=2)
+        new_photos += [p for p in page2 if p["id"] not in posted_ids]
 
-    if not new_photos:
-        print("No new wallpapers available.")
-    return
-
-    # Pick random new wallpaper
-    photo = random.choice(new_photos)
-
-    # Save ID
-    posted_ids.append(photo["id"])
-    save_posted_ids(posted_ids)
-
-    # Safer image size
-    image_url = photo["src"]["medium"]
-
-    print("Downloading image...")
-
-    image_response = requests.get(image_url, timeout=20)
-    image_data = image_response.content
-
-    # Save temporarily
-    image_path = "wallpaper.jpg"
-
-    with open(image_path, "wb") as file:
-        file.write(image_data)
-
-    print("Sending to Telegram...")
-
-    with open(image_path, "rb") as photo_file:
-        await bot.send_photo(
-            chat_id=CHANNEL_ID,
-            photo=photo_file,
-            caption="🔥 Here is your Daily Wallpaper! Enjoy your day! 🔥"
-        )
-
-    print("Wallpaper posted successfully!")
+    # If still not enough, reset this theme's history and use all from page 1
+    if len(new_photos) < PHOTOS_PER_POST:
+        print(f"Theme '{theme_label}' exhausted — resetting history and reusing photos.")
+        posted_ids = []
+        new_photos = photos  
 
 
-app = Application.builder().token(BOT_TOKEN).build()
+    # Pick PHOTOS_PER_POST random photos (no repeats within the batch)
+    selected = random.sample(new_photos, min(PHOTOS_PER_POST, len(new_photos)))
+
+    print(f"Sending {len(selected)} photos for theme: {theme_label}...")
+
+    for i, photo in enumerate(selected):
+        image_url = photo["src"]["large2x"]
+        image_path = f"wallpaper_{i}.jpg"
+
+        try:
+            image_response = requests.get(image_url, timeout=20)
+            with open(image_path, "wb") as file:
+                file.write(image_response.content)
+
+            caption = (
+                f"{theme_emoji} *{theme_label} Wallpaper {i + 1}/{len(selected)}*\n"
+                f"Enjoy your wallpaper of the day! 🔥"
+            )
+
+            with open(image_path, "rb") as photo_file:
+                await bot.send_photo(
+                    chat_id=CHANNEL_ID,
+                    photo=photo_file,
+                    caption=caption,
+                    parse_mode="Markdown"
+                )
+
+            print(f"  ✓ Photo {i + 1} sent.")
+
+        except Exception as e:
+            print(f"  ✗ Failed to send photo {i + 1}: {e}")
+
+        finally:
+            if os.path.exists(image_path):
+                os.remove(image_path)
+
+        # Small delay between sends to avoid Telegram rate limits
+        await asyncio.sleep(2)
+
+    # Update posted IDs for this theme
+    posted_ids.extend([p["id"] for p in selected])
+    save_posted_ids_for_theme(db, theme_key, posted_ids)
+
+    print(f"Done! {len(selected)} wallpapers posted for theme: {theme_label}")    
 
 
-# ----------------------------
+
+    
+
 # SCHEDULER + MAIN LOOP
-# ----------------------------
+
 scheduler = AsyncIOScheduler()
 
 async def main():
-    # Change this for testing (e.g. minutes=1)
+    
     scheduler.add_job(
         send_daily_wallpaper,
         "interval",
@@ -146,12 +198,10 @@ async def main():
 
     print("Bot is running...")
 
-    await app.initialize()
-    await app.start()
-    await app.updater.start_polling()
-
     while True:
-        await asyncio.sleep(60)
+        await ayncio.sleep(60)
+
+    
 
 if __name__ == "__main__":
     asyncio.run(main())  
